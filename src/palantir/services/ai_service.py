@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+import time
 
 from google import genai
 from google.genai import types
@@ -44,9 +46,14 @@ class AIService:
         self,
         api_key: str,
         text_model: str = "gemini-2.5-flash",
+        rpm_limit: int = 8,
+        score_threshold: int = 6,
     ) -> None:
         self._client = genai.Client(api_key=api_key)
         self._text_model = text_model
+        self._min_interval = 60.0 / rpm_limit
+        self._last_call: float = 0.0
+        self._score_threshold = score_threshold
 
     async def process(self, post: RawPost) -> ScoredPost | FinalPost | None:
         """Analyze, score, and (if score >= 6) rewrite post in one flow.
@@ -56,6 +63,12 @@ class AIService:
             FinalPost   — if score >= 6 (ready for admin).
             None        — on error.
         """
+        wait = self._min_interval - (time.monotonic() - self._last_call)
+        if wait > 0:
+            logger.debug("Rate limiter: sleeping %.1fs", wait)
+            await asyncio.sleep(wait)
+        self._last_call = time.monotonic()
+
         try:
             response = await self._client.aio.models.generate_content(
                 model=self._text_model,
@@ -77,7 +90,7 @@ class AIService:
 
         logger.info("Post %s scored %d/10", post.unique_key, score)
 
-        if score < 6:
+        if score < self._score_threshold:
             return scored
 
         rewritten_text = data.get("rewritten_text")

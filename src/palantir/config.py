@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     poll_interval_seconds: int = 300
     scrape_limit: int = 50
 
+    # --- AI Rate Limiting ---
+    ai_rpm_limit: int = Field(
+        default=8,
+        description="Max Gemini API requests per minute (free tier = 10 RPM)",
+    )
+
     # --- Database ---
     db_path: str = str(BASE_DIR / "data" / "palantir.db")
 

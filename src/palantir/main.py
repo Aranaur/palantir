@@ -41,6 +41,8 @@ async def main() -> None:
     ai = AIService(
         api_key=settings.gemini_api_key,
         text_model=settings.gemini_model,
+        rpm_limit=settings.ai_rpm_limit,
+        score_threshold=settings.score_threshold,
     )
     notifier = NotificationService(
         bot_token=settings.bot_token,

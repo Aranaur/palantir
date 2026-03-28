@@ -65,7 +65,7 @@ class ScraperService:
                         source_id=f"tg:{channel}",
                         post_id=str(msg.id),
                         text=msg.text,
-                        url=f"https://t.me/{channel}/{msg.id}",
+                        url=f"https://t.me/{channel.lstrip('@')}/{msg.id}",
                         timestamp=msg.date.replace(tzinfo=timezone.utc) if msg.date else datetime.now(timezone.utc),
                     )
                     posts.append(post)
