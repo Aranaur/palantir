@@ -111,4 +111,7 @@ class AIService:
     @staticmethod
     def _parse_json(text: str) -> dict:
         cleaned = re.sub(r"```(?:json)?\s*", "", text).strip().rstrip("`")
-        return json.loads(cleaned)
+        result = json.loads(cleaned)
+        if isinstance(result, list):
+            result = result[0]
+        return result
