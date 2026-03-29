@@ -32,6 +32,7 @@ class Settings(BaseSettings):
 
     # --- Google Gemini ---
     gemini_api_key: str
+    gemini_api_key_2: str = ""
     gemini_model: str = "gemini-2.5-flash"
 
     # --- Telegram Bot (aiogram) ---

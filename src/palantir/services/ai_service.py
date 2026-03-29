@@ -51,6 +51,7 @@ class AIService:
         text_model: str = "gemini-2.5-flash",
         rpm_limit: int = 8,
         score_threshold: int = 6,
+        fallback_api_key: str = "",
     ) -> None:
         self._client = genai.Client(api_key=api_key)
         self._text_model = text_model
@@ -58,6 +59,8 @@ class AIService:
         self._last_call: float = 0.0
         self._score_threshold = score_threshold
         self._system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(threshold=score_threshold)
+        self._fallback_key = fallback_api_key
+        self._using_fallback = False
 
     async def process(self, post: RawPost) -> ScoredPost | FinalPost | None:
         """Analyze, score, and (if score >= 6) rewrite post in one flow.
@@ -131,18 +134,22 @@ class AIService:
 
         raise RuntimeError("Unreachable")  # pragma: no cover
 
-    @staticmethod
-    def _extract_retry_delay(exc: ClientError | ServerError) -> float | None:
+    def _extract_retry_delay(self, exc: ClientError | ServerError) -> float | None:
         """Extract retry delay from Gemini error response, or use default backoff.
 
         Returns None for daily quota errors (retrying won't help until midnight).
         """
         status = getattr(exc, "status_code", 0)
         if status == 429 or status >= 500:
-            # Daily quota exhausted — no point retrying
+            # Daily quota exhausted — switch to fallback key if available
             exc_str = str(exc).lower()
             if "per_day" in exc_str or "perday" in exc_str or "per day" in exc_str:
-                logger.error("Daily Gemini quota exhausted. Stopping AI processing.")
+                if self._fallback_key and not self._using_fallback:
+                    logger.warning("Daily quota exhausted, switching to fallback Gemini key")
+                    self._client = genai.Client(api_key=self._fallback_key)
+                    self._using_fallback = True
+                    return 0.0  # retry immediately with new key
+                logger.error("Daily Gemini quota exhausted on all keys. Stopping AI processing.")
                 return None
             # Try to parse retryDelay from error details
             details = getattr(exc, "details", None) or []
