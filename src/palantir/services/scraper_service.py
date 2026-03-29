@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import feedparser
+import httpx
+from bs4 import BeautifulSoup
 from telethon import TelegramClient
 from telethon.tl.types import Message
 
@@ -16,6 +18,9 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+_HTTP_TIMEOUT = 15.0
+_MAX_BODY_LEN = 4000  # chars — enough context for AI, avoids huge pages
 
 
 class ScraperService:
@@ -34,6 +39,11 @@ class ScraperService:
         self._rss_feeds = rss_feeds
         self._scrape_limit = scrape_limit
         self._client = TelegramClient(tg_session_name, tg_api_id, tg_api_hash)
+        self._http = httpx.AsyncClient(
+            timeout=_HTTP_TIMEOUT,
+            follow_redirects=True,
+            headers={"User-Agent": "Palantir/1.0 (RSS reader)"},
+        )
 
     async def start(self) -> None:
         await self._client.start()
@@ -41,6 +51,7 @@ class ScraperService:
 
     async def stop(self) -> None:
         await self._client.disconnect()
+        await self._http.aclose()
         logger.info("Telethon client disconnected")
 
     async def fetch_all(self) -> list[RawPost]:
@@ -80,10 +91,11 @@ class ScraperService:
             try:
                 feed = await loop.run_in_executor(None, feedparser.parse, feed_url)
                 for entry in feed.entries[: self._scrape_limit]:
-                    text = entry.get("summary") or entry.get("title") or ""
-                    if not text:
-                        continue
+                    summary = entry.get("summary") or entry.get("title") or ""
                     link = entry.get("link", feed_url)
+                    if not summary and not link:
+                        continue
+
                     post_id = hashlib.sha256(link.encode()).hexdigest()[:16]
                     published = entry.get("published_parsed")
                     ts = (
@@ -91,6 +103,10 @@ class ScraperService:
                         if published
                         else datetime.now(timezone.utc)
                     )
+
+                    full_text = await self._fetch_article(link)
+                    text = full_text if full_text else summary
+
                     posts.append(
                         RawPost(
                             source_id=f"rss:{feed_url}",
@@ -103,3 +119,42 @@ class ScraperService:
             except Exception:
                 logger.exception("Failed to fetch RSS feed: %s", feed_url)
         return posts
+
+    async def _fetch_article(self, url: str) -> str | None:
+        """Fetch full article text from URL. Returns None on failure."""
+        try:
+            resp = await self._http.get(url)
+            resp.raise_for_status()
+
+            content_type = resp.headers.get("content-type", "")
+            if "html" not in content_type:
+                return None
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            # Remove non-content elements
+            for tag in soup.find_all(["script", "style", "nav", "header", "footer", "aside", "form"]):
+                tag.decompose()
+
+            # Try common article containers first
+            article = (
+                soup.find("article")
+                or soup.find("main")
+                or soup.find(class_=lambda c: c and "post-content" in c)
+                or soup.find(class_=lambda c: c and "article-body" in c)
+                or soup.find(class_=lambda c: c and "entry-content" in c)
+            )
+
+            target = article if article else soup.body
+            if not target:
+                return None
+
+            text = target.get_text(separator="\n", strip=True)
+            if len(text) < 100:
+                return None
+
+            return text[:_MAX_BODY_LEN]
+
+        except Exception:
+            logger.debug("Failed to fetch article: %s", url)
+            return None
