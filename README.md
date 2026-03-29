@@ -5,7 +5,7 @@
 <h1 align="center">Palantir</h1>
 
 <p align="center">
-  <em>Всевидяче око для Data Science контенту</em>
+  <em>The all-seeing eye for Data Science content</em>
 </p>
 
 <p align="center">
@@ -17,7 +17,7 @@
 
 ---
 
-Автоматизований бот-куратор контенту, який щодня сканує Telegram-канали та RSS-фіди, аналізує матеріали за допомогою Google Gemini AI та надсилає персональний дайджест найцікавіших публікацій у Telegram.
+An automated content curator bot that daily scans Telegram channels and RSS feeds, analyzes materials using Google Gemini AI, and sends a personal digest of the most interesting publications via Telegram.
 
 <p align="center">
   <img src="assets/palantir-banner.png" alt="Palantir Banner" width="100%">
@@ -27,29 +27,29 @@
 
 ```mermaid
 flowchart LR
-    subgraph Sources["📥 Джерела"]
-        TG["Telegram\nканали"]
-        RSS["RSS\nфіди"]
+    subgraph Sources["📥 Sources"]
+        TG["Telegram\nchannels"]
+        RSS["RSS\nfeeds"]
     end
 
-    subgraph Scraper["🔍 Збір"]
+    subgraph Scraper["🔍 Scraping"]
         S["ScraperService"]
-        WEB["Web Scraping\n(повний текст)"]
+        WEB["Web Scraping\n(full text)"]
     end
 
-    subgraph Processing["⚙️ Обробка"]
-        DD["Дедуплікація\n(Jaccard similarity)"]
-        DB_CHECK["Перевірка\nis_seen?"]
+    subgraph Processing["⚙️ Processing"]
+        DD["Deduplication\n(Jaccard similarity)"]
+        DB_CHECK["Check\nis_seen?"]
         AI["Gemini AI\nscoring + summary"]
     end
 
-    subgraph Output["📤 Результат"]
-        DIGEST["Щоденний\nдайджест"]
-        BUTTONS["📌 Зберегти\n👎 Не цікаво"]
-        REPORT["📊 Щотижневий\nзвіт"]
+    subgraph Output["📤 Output"]
+        DIGEST["Daily\ndigest"]
+        BUTTONS["📌 Save\n👎 Not interesting"]
+        REPORT["📊 Weekly\nreport"]
     end
 
-    subgraph Storage["💾 Сховище"]
+    subgraph Storage["💾 Storage"]
         DB[(SQLite)]
     end
 
@@ -58,7 +58,7 @@ flowchart LR
     S --> WEB
     WEB --> DD
     DD --> DB_CHECK
-    DB_CHECK -->|новий| AI
+    DB_CHECK -->|new| AI
     DB_CHECK -->|seen| SKIP["⏭️ skip"]
     AI -->|"score ≥ threshold"| DIGEST
     AI -->|"score < threshold"| SKIP
@@ -74,28 +74,28 @@ flowchart LR
     style Storage fill:#1a1a2e,stroke:#a8a8a8,color:#fff
 ```
 
-## Архітектура
+## Architecture
 
 ```mermaid
 flowchart TB
     subgraph VM["Oracle Cloud VM (Always Free)"]
         subgraph Cron["⏰ Cron"]
-            C1["12:00 — pipeline\n(дайджест)"]
-            C2["Пн 10:00 — report\n(звіт)"]
+            C1["12:00 — pipeline\n(digest)"]
+            C2["Mon 10:00 — report\n(report)"]
         end
 
         subgraph Services["🔧 Systemd"]
-            BOT["palantir-bot\n(callbacks + команди)"]
+            BOT["palantir-bot\n(callbacks + commands)"]
         end
 
         DB[(SQLite\npalantir.db)]
     end
 
-    TG_IN["Telegram\nканали"] -->|Telethon| C1
-    RSS_IN["RSS фіди"] -->|"feedparser + httpx"| C1
+    TG_IN["Telegram\nchannels"] -->|Telethon| C1
+    RSS_IN["RSS feeds"] -->|"feedparser + httpx"| C1
     GEMINI["Gemini AI"] <-->|google-genai| C1
 
-    C1 -->|aiogram| TG_OUT["Telegram\n(дайджест)"]
+    C1 -->|aiogram| TG_OUT["Telegram\n(digest)"]
     C2 -->|aiogram| TG_OUT
     BOT <-->|long-polling| TG_OUT
 
@@ -108,54 +108,54 @@ flowchart TB
     style Services fill:#161b22,stroke:#4ecca3,color:#fff
 ```
 
-## Можливості
+## Features
 
-- **Збір контенту** — Telegram канали (Telethon) + RSS фіди з автоматичним web scraping повного тексту
-- **AI аналіз** — Google Gemini оцінює кожну публікацію за 10-бальною шкалою
-- **Дедуплікація** — фільтрація схожого контенту з різних джерел (Jaccard similarity)
-- **Щоденний дайджест** — відсортовані за рейтингом рекомендації з кнопками реакцій
-- **Щотижневий звіт** — статистика: оброблено, рекомендовано, розподіл оцінок, топ джерела
-- **Telegram команди** — `/status`, `/sources`, `/report`, `/run`, `/help`
-- **Rate limiting** — вбудований лімітер з retry для Gemini free tier
-- **Dashboard** — Streamlit-додаток для аналітики (запуск локально)
+- **Content Scraping** — Telegram channels (Telethon) + RSS feeds with automatic full-text web scraping
+- **AI Analysis** — Google Gemini scores each publication on a 10-point scale
+- **Deduplication** — filtering similar content from different sources (Jaccard similarity)
+- **Daily Digest** — sorted recommendations by rating with reaction buttons
+- **Weekly Report** — statistics: processed, recommended, score distribution, top sources
+- **Telegram Commands** — `/status`, `/sources`, `/report`, `/run`, `/help`
+- **Rate limiting** — built-in limiter with retry for Gemini free tier
+- **Dashboard** — Streamlit app for analytics (local launch)
 
-## Швидкий старт
+## Quick Start
 
-### Вимоги
+### Requirements
 
 - Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (менеджер пакетів)
+- [uv](https://docs.astral.sh/uv/) (package manager)
 - Telegram API credentials ([my.telegram.org](https://my.telegram.org))
 - Telegram Bot Token ([@BotFather](https://t.me/BotFather))
 - Google Gemini API Key ([ai.google.dev](https://ai.google.dev))
 
-### Встановлення
+### Installation
 
 ```bash
 git clone https://github.com/Aranaur/palantir.git
 cd palantir
 uv sync --no-dev
 cp .env.example .env
-# Заповни .env своїми ключами
+# Fill .env with your keys
 ```
 
-### Перший запуск
+### First Run
 
 ```bash
-# Інтерактивний логін Telethon (один раз)
+# Interactive Telethon login (run once)
 uv run python -m palantir.main
 
-# Запуск бота для обробки кнопок
+# Run bot to process buttons
 uv run python -m palantir.bot
 
-# Щотижневий звіт
+# Weekly report
 uv run python -m palantir.report
 
-# Dashboard (локально)
+# Dashboard (locally)
 uv run streamlit run src/palantir/dashboard.py
 ```
 
-### Налаштування `.env`
+### Configuration `.env`
 
 ```env
 # Telegram Userbot (Telethon)
@@ -180,18 +180,18 @@ SCRAPE_LIMIT=20
 AI_RPM_LIMIT=8
 ```
 
-## Деплой (Oracle Cloud Free Tier)
+## Deployment (Oracle Cloud Free Tier)
 
 <details>
-<summary>Покрокова інструкція</summary>
+<summary>Step-by-step guide</summary>
 
-### 1. Створити VM
+### 1. Create VM
 
 - Oracle Cloud → Compute → Create Instance
-- Shape: `VM.Standard.A1.Flex` (1 OCPU, 6 GB RAM) або `VM.Standard.E2.1.Micro` (1 GB RAM)
+- Shape: `VM.Standard.A1.Flex` (1 OCPU, 6 GB RAM) or `VM.Standard.E2.1.Micro` (1 GB RAM)
 - Image: Ubuntu 22.04
 
-### 2. Встановити залежності
+### 2. Install dependencies
 
 ```bash
 sudo add-apt-repository ppa:deadsnakes/ppa -y
@@ -199,16 +199,16 @@ sudo apt update && sudo apt install -y python3.12 python3.12-venv git
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### 3. Деплой
+### 3. Deploy
 
 ```bash
 git clone https://github.com/Aranaur/palantir.git
 cd palantir && uv sync --no-dev
-nano .env  # заповнити ключі
-uv run python -m palantir.main  # перший запуск для логіну Telethon
+nano .env  # fill in the keys
+uv run python -m palantir.main  # first run for Telethon login
 ```
 
-### 4. Systemd сервіс (pipeline, one-shot)
+### 4. Systemd service (pipeline, one-shot)
 
 ```ini
 # /etc/systemd/system/palantir.service
@@ -228,7 +228,7 @@ StandardError=append:/home/ubuntu/palantir.log
 WantedBy=multi-user.target
 ```
 
-### 5. Systemd сервіс (callback бот)
+### 5. Systemd service (callback bot)
 
 ```ini
 # /etc/systemd/system/palantir-bot.service
@@ -252,33 +252,33 @@ WantedBy=multi-user.target
 sudo systemctl enable palantir-bot --now
 ```
 
-### 6. Cron розклад
+### 6. Cron schedule
 
 ```bash
 crontab -e
 ```
 
 ```cron
-# Дайджест щодня о 12:00 (Київ, UTC+3)
+# Digest daily at 12:00 (Kyiv, UTC+3)
 0 9 * * * sudo systemctl start palantir
 
-# Щотижневий звіт (понеділок 10:00 Київ)
+# Weekly report (Monday 10:00 Kyiv)
 0 7 * * 1 cd /home/ubuntu/palantir && /home/ubuntu/.local/bin/uv run python -m palantir.report >> /home/ubuntu/palantir-report.log 2>&1
 ```
 
 </details>
 
-## Telegram команди
+## Telegram Commands
 
-| Команда | Опис |
+| Command | Description |
 |---------|------|
-| `/help` | Список команд |
-| `/status` | Статистика за сьогодні |
-| `/sources` | Список усіх джерел |
-| `/report` | Щотижневий звіт |
-| `/run` | Запустити pipeline вручну |
+| `/help` | List of commands |
+| `/status` | Statistics for today |
+| `/sources` | List of all sources |
+| `/report` | Weekly report |
+| `/run` | Run pipeline manually |
 
-## Структура проєкту
+## Project Structure
 
 ```
 palantir/
@@ -306,12 +306,13 @@ palantir/
 └── pyproject.toml
 ```
 
-## Ліцензія
+## License
 
 MIT
 
 ---
 
 <p align="center">
-  <em>"Той, хто контролює інформацію, контролює світ"</em>
+  <em>"He who controls information controls the world"</em>
 </p>
+
