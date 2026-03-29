@@ -8,6 +8,7 @@ import time
 
 from google import genai
 from google.genai import types
+from google.genai.errors import ClientError, ServerError
 
 from palantir.models.post import FinalPost, RawPost, ScoredPost
 
@@ -42,6 +43,8 @@ _SYSTEM_PROMPT = """\
 class AIService:
     """Handles all LLM interactions via Google GenAI (Gemini)."""
 
+    _MAX_RETRIES = 3
+
     def __init__(
         self,
         api_key: str,
@@ -63,23 +66,8 @@ class AIService:
             FinalPost   — if score >= 6 (ready for admin).
             None        — on error.
         """
-        wait = self._min_interval - (time.monotonic() - self._last_call)
-        if wait > 0:
-            logger.debug("Rate limiter: sleeping %.1fs", wait)
-            await asyncio.sleep(wait)
-        self._last_call = time.monotonic()
-
         try:
-            response = await self._client.aio.models.generate_content(
-                model=self._text_model,
-                contents=post.text,
-                config=types.GenerateContentConfig(
-                    system_instruction=_SYSTEM_PROMPT,
-                    temperature=0.4,
-                    response_mime_type="application/json",
-                ),
-            )
-            data = self._parse_json(response.text or "")
+            data = await self._call_llm_with_retry(post.text)
             score = int(data["score"])
             rationale = str(data["rationale"])
         except Exception:
@@ -106,6 +94,59 @@ class AIService:
             scored=scored,
             rewritten_text=str(rewritten_text),
         )
+
+    async def _call_llm_with_retry(self, text: str) -> dict:
+        """Call Gemini with rate limiting and retry on 429/5xx errors."""
+        for attempt in range(1, self._MAX_RETRIES + 1):
+            wait = self._min_interval - (time.monotonic() - self._last_call)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_call = time.monotonic()
+
+            try:
+                response = await self._client.aio.models.generate_content(
+                    model=self._text_model,
+                    contents=text,
+                    config=types.GenerateContentConfig(
+                        system_instruction=_SYSTEM_PROMPT,
+                        temperature=0.4,
+                        response_mime_type="application/json",
+                    ),
+                )
+                return self._parse_json(response.text or "")
+            except (ClientError, ServerError) as exc:
+                retry_after = self._extract_retry_delay(exc)
+                if attempt < self._MAX_RETRIES and retry_after is not None:
+                    logger.warning(
+                        "LLM attempt %d/%d failed (%s), retrying in %.0fs",
+                        attempt, self._MAX_RETRIES, exc.status_code, retry_after,
+                    )
+                    await asyncio.sleep(retry_after)
+                    continue
+                raise
+
+        raise RuntimeError("Unreachable")  # pragma: no cover
+
+    @staticmethod
+    def _extract_retry_delay(exc: ClientError | ServerError) -> float | None:
+        """Extract retry delay from Gemini error response, or use default backoff."""
+        status = getattr(exc, "status_code", 0)
+        if status == 429 or status >= 500:
+            # Try to parse retryDelay from error details
+            details = getattr(exc, "details", None) or []
+            if isinstance(details, dict):
+                details = details.get("details", [])
+            for detail in details:
+                if isinstance(detail, dict) and "retryDelay" in detail:
+                    delay_str = detail["retryDelay"]
+                    if isinstance(delay_str, str) and delay_str.endswith("s"):
+                        try:
+                            return float(delay_str.rstrip("s"))
+                        except ValueError:
+                            pass
+            # Default backoff for retryable errors
+            return 30.0
+        return None
 
     @staticmethod
     def _parse_json(text: str) -> dict:
