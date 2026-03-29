@@ -5,6 +5,7 @@ import logging
 from palantir.models.post import FinalPost, ScoredPost
 from palantir.services.ai_service import AIService
 from palantir.services.db_service import DBService
+from palantir.services.dedup_service import deduplicate
 from palantir.services.notification_service import NotificationService
 from palantir.services.scraper_service import ScraperService
 
@@ -31,7 +32,8 @@ class Pipeline:
         recommendations: list[FinalPost] = []
 
         raw_posts = await self._scraper.fetch_all()
-        logger.info("Pipeline: %d raw posts fetched", len(raw_posts))
+        raw_posts = deduplicate(raw_posts)
+        logger.info("Pipeline: %d posts after dedup", len(raw_posts))
 
         for post in raw_posts:
             if await self._db.is_seen(post.unique_key):
