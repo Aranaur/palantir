@@ -28,7 +28,7 @@ class Pipeline:
 
     async def run_once(self) -> int:
         """Run one full cycle. Returns number of recommendations sent."""
-        sent_count = 0
+        recommendations: list[FinalPost] = []
 
         raw_posts = await self._scraper.fetch_all()
         logger.info("Pipeline: %d raw posts fetched", len(raw_posts))
@@ -55,13 +55,19 @@ class Pipeline:
             if not isinstance(result, FinalPost):
                 continue
 
+            recommendations.append(result)
+
+        if recommendations:
+            recommendations.sort(key=lambda fp: fp.scored.score, reverse=True)
             try:
-                await self._notifier.send_recommendation(result)
-                await self._db.mark_sent(post.unique_key, result.scored.score)
-                sent_count += 1
+                await self._notifier.send_digest(recommendations)
+                for rec in recommendations:
+                    await self._db.mark_sent(rec.scored.raw.unique_key, rec.scored.score)
             except Exception:
-                logger.exception("Failed to send recommendation for: %s", post.unique_key)
+                logger.exception("Failed to send digest")
 
-        logger.info("Pipeline cycle complete: %d recommendations sent", sent_count)
-        return sent_count
-
+        logger.info(
+            "Pipeline cycle complete: %d recommendations sent",
+            len(recommendations),
+        )
+        return len(recommendations)
