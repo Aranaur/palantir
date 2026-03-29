@@ -38,13 +38,13 @@ class Pipeline:
             if await self._db.is_seen(post.unique_key):
                 continue
 
-            await self._db.mark_seen(post.unique_key, post.source_id, post.post_id)
-
             result = await self._ai.process(post)
             await asyncio.sleep(13)  # Gemini free tier: 5 RPM → 1 req/13s
 
             if result is None:
                 continue
+
+            await self._db.mark_seen(post.unique_key, post.source_id, post.post_id)
 
             if isinstance(result, ScoredPost):
                 logger.info(
