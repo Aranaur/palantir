@@ -62,7 +62,7 @@ class NotificationService:
     async def _send_post(self, post: FinalPost) -> None:
         safe_text = html.escape(post.rewritten_text)
         safe_rationale = html.escape(
-            self._truncate(post.scored.rationale, 150),
+            self._truncate(post.scored.rationale, 300),
         )
         url = html.escape(post.scored.raw.url)
         unique_key = post.scored.raw.unique_key
