@@ -61,12 +61,9 @@ class Pipeline:
 
         if recommendations:
             recommendations.sort(key=lambda fp: fp.scored.score, reverse=True)
-            try:
-                await self._notifier.send_digest(recommendations)
-                for rec in recommendations:
-                    await self._db.mark_sent(rec.scored.raw.unique_key, rec.scored.score)
-            except Exception:
-                logger.exception("Failed to send digest")
+            sent = await self._notifier.send_digest(recommendations)
+            for rec in sent:
+                await self._db.mark_sent(rec.scored.raw.unique_key, rec.scored.score)
 
         logger.info(
             "Pipeline cycle complete: %d recommendations sent",

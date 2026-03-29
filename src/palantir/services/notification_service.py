@@ -35,22 +35,29 @@ class NotificationService:
         self._bot = Bot(token=bot_token)
         self._admin_id = admin_id
 
-    async def send_digest(self, posts: list[FinalPost]) -> None:
-        """Send digest header + individual post messages with reaction buttons."""
+    async def send_digest(self, posts: list[FinalPost]) -> list[FinalPost]:
+        """Send digest header + individual post messages with reaction buttons.
+
+        Returns the list of posts that were successfully sent.
+        """
         date_str = datetime.now(timezone.utc).strftime("%d.%m.%Y")
 
-        # Header message
         await self._bot.send_message(
             chat_id=self._admin_id,
             text=_DIGEST_HEADER.format(date=date_str, count=len(posts)),
             parse_mode="HTML",
         )
 
-        # Individual posts with buttons
+        sent: list[FinalPost] = []
         for post in posts:
-            await self._send_post(post)
+            try:
+                await self._send_post(post)
+                sent.append(post)
+            except Exception:
+                logger.exception("Failed to send post %s", post.scored.raw.unique_key)
 
-        logger.info("Digest sent: %d post(s)", len(posts))
+        logger.info("Digest sent: %d/%d post(s)", len(sent), len(posts))
+        return sent
 
     async def _send_post(self, post: FinalPost) -> None:
         safe_text = html.escape(post.rewritten_text)
