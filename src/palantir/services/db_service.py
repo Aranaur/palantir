@@ -75,6 +75,60 @@ class DBService:
         await self.conn.commit()
         logger.info("Post marked as sent: %s (score=%d)", unique_key, score)
 
+    async def weekly_stats(self, days: int = 7) -> dict:
+        """Gather stats for the last N days."""
+        c = self.conn
+
+        # Total posts seen
+        row = await (await c.execute(
+            "SELECT COUNT(*) FROM posts WHERE created_at >= datetime('now', ?)",
+            (f"-{days} days",),
+        )).fetchone()
+        total_seen = row[0] if row else 0
+
+        # Total sent (recommended)
+        row = await (await c.execute(
+            "SELECT COUNT(*) FROM posts WHERE sent = 1 AND created_at >= datetime('now', ?)",
+            (f"-{days} days",),
+        )).fetchone()
+        total_sent = row[0] if row else 0
+
+        # Score distribution
+        rows = await (await c.execute(
+            "SELECT score, COUNT(*) FROM posts "
+            "WHERE score IS NOT NULL AND created_at >= datetime('now', ?) "
+            "GROUP BY score ORDER BY score DESC",
+            (f"-{days} days",),
+        )).fetchall()
+        score_dist = {r[0]: r[1] for r in rows}
+
+        # Top sources by sent count
+        rows = await (await c.execute(
+            "SELECT source_id, COUNT(*) as cnt FROM posts "
+            "WHERE sent = 1 AND created_at >= datetime('now', ?) "
+            "GROUP BY source_id ORDER BY cnt DESC LIMIT 5",
+            (f"-{days} days",),
+        )).fetchall()
+        top_sources = [(r[0], r[1]) for r in rows]
+
+        # Feedback counts
+        rows = await (await c.execute(
+            "SELECT reaction, COUNT(*) FROM feedback "
+            "WHERE created_at >= datetime('now', ?) "
+            "GROUP BY reaction",
+            (f"-{days} days",),
+        )).fetchall()
+        feedback = {r[0]: r[1] for r in rows}
+
+        return {
+            "days": days,
+            "total_seen": total_seen,
+            "total_sent": total_sent,
+            "score_dist": score_dist,
+            "top_sources": top_sources,
+            "feedback": feedback,
+        }
+
     async def save_feedback(self, unique_key: str, reaction: str) -> None:
         await self.conn.execute(
             "INSERT OR IGNORE INTO feedback (unique_key, reaction) VALUES (?, ?)",

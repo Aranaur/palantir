@@ -110,5 +110,45 @@ class NotificationService:
             cut = cut[:last_amp]
         return cut + "..."
 
+    async def send_weekly_report(self, stats: dict) -> None:
+        """Send a weekly summary report."""
+        days = stats["days"]
+        total_seen = stats["total_seen"]
+        total_sent = stats["total_sent"]
+        score_dist = stats["score_dist"]
+        top_sources = stats["top_sources"]
+        feedback = stats["feedback"]
+
+        lines = [
+            f"📊 <b>Щотижневий звіт</b> (останні {days} днів)\n",
+            f"📥 Оброблено постів: <b>{total_seen}</b>",
+            f"📤 Надіслано рекомендацій: <b>{total_sent}</b>",
+        ]
+
+        if feedback:
+            saved = feedback.get("save", 0)
+            skipped = feedback.get("skip", 0)
+            lines.append(f"📌 Збережено: <b>{saved}</b> · 👎 Не цікаво: <b>{skipped}</b>")
+
+        if score_dist:
+            lines.append("\n<b>Розподіл оцінок:</b>")
+            for score in sorted(score_dist, reverse=True):
+                bar = "█" * min(score_dist[score], 20)
+                lines.append(f"  {score:>2}/10: {bar} {score_dist[score]}")
+
+        if top_sources:
+            lines.append("\n<b>Топ джерела:</b>")
+            for source_id, count in top_sources:
+                name = source_id.replace("tg:@", "@").replace("rss:", "")
+                lines.append(f"  — {name}: {count} рек.")
+
+        await self._bot.send_message(
+            chat_id=self._admin_id,
+            text="\n".join(lines),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        logger.info("Weekly report sent")
+
     async def close(self) -> None:
         await self._bot.session.close()
