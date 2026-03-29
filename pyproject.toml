@@ -15,6 +15,7 @@ dependencies = [
     "pydantic-settings>=2.13.1",
     "python-dotenv>=1.2.2",
     "telethon>=1.42.0",
+    "streamlit>=1.45.0",
 ]
 
 [project.scripts]
