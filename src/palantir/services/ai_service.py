@@ -126,7 +126,7 @@ class AIService:
                 if attempt < self._MAX_RETRIES and retry_after is not None:
                     logger.warning(
                         "LLM attempt %d/%d failed (%s), retrying in %.0fs",
-                        attempt, self._MAX_RETRIES, exc.status_code, retry_after,
+                        attempt, self._MAX_RETRIES, exc.code, retry_after,
                     )
                     await asyncio.sleep(retry_after)
                     continue
@@ -139,7 +139,7 @@ class AIService:
 
         Returns None for daily quota errors (retrying won't help until midnight).
         """
-        status = getattr(exc, "status_code", 0)
+        status = getattr(exc, "code", None) or getattr(exc, "status_code", 0)
         if status == 429 or status >= 500:
             # Daily quota exhausted — switch to fallback key if available
             exc_str = str(exc).lower()
