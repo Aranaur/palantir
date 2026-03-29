@@ -5,22 +5,26 @@ import logging
 from datetime import datetime, timezone
 
 from aiogram import Bot
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from palantir.models.post import FinalPost
 
 logger = logging.getLogger(__name__)
 
-_DIGEST_HEADER = "📋 <b>Щоденний дайджест</b> — {date}\nЗнайдено рекомендацій: {count}\n"
+_DIGEST_HEADER = (
+    "📋 <b>Щоденний дайджест</b> — {date}\n"
+    "Знайдено рекомендацій: {count}"
+)
 
-_DIGEST_ITEM = """\
+_POST_TEMPLATE = """\
+{summary}
 
 ━━━━━━━━━━━━━━━━━━━━
-<b>{index}.</b> {summary}
-🔥 {score}/10 · 💬 {rationale}
+🔥 Рейтинг: <b>{score}/10</b>
+💬 {rationale}
 🔗 <a href="{url}">Оригінал</a>"""
 
 _MAX_MESSAGE_LEN = 4096
-_PART_SUFFIX_RESERVE = 30  # room for "📄 Частина XX/XX"
 
 
 class NotificationService:
@@ -31,58 +35,69 @@ class NotificationService:
         self._admin_id = admin_id
 
     async def send_digest(self, posts: list[FinalPost]) -> None:
-        """Send a daily digest with all recommendations."""
+        """Send digest header + individual post messages with reaction buttons."""
         date_str = datetime.now(timezone.utc).strftime("%d.%m.%Y")
-        header = _DIGEST_HEADER.format(date=date_str, count=len(posts))
 
-        items: list[str] = []
-        for i, post in enumerate(posts, 1):
-            summary = html.escape(self._truncate(post.rewritten_text, 300))
-            rationale = html.escape(self._truncate(post.scored.rationale, 150))
-            url = html.escape(post.scored.raw.url)
-            items.append(
-                _DIGEST_ITEM.format(
-                    index=i,
-                    summary=summary,
-                    score=post.scored.score,
-                    rationale=rationale,
-                    url=url,
-                )
+        # Header message
+        await self._bot.send_message(
+            chat_id=self._admin_id,
+            text=_DIGEST_HEADER.format(date=date_str, count=len(posts)),
+            parse_mode="HTML",
+        )
+
+        # Individual posts with buttons
+        for post in posts:
+            await self._send_post(post)
+
+        logger.info("Digest sent: %d post(s)", len(posts))
+
+    async def _send_post(self, post: FinalPost) -> None:
+        safe_text = html.escape(post.rewritten_text)
+        safe_rationale = html.escape(
+            self._truncate(post.scored.rationale, 150),
+        )
+        url = html.escape(post.scored.raw.url)
+        unique_key = post.scored.raw.unique_key
+
+        message = _POST_TEMPLATE.format(
+            summary=safe_text,
+            score=post.scored.score,
+            rationale=safe_rationale,
+            url=url,
+        )
+
+        if len(message) > _MAX_MESSAGE_LEN:
+            available = _MAX_MESSAGE_LEN - (len(message) - len(safe_text)) - 3
+            safe_text = self._truncate(safe_text, available)
+            message = _POST_TEMPLATE.format(
+                summary=safe_text,
+                score=post.scored.score,
+                rationale=safe_rationale,
+                url=url,
             )
 
-        messages = self._split_messages(header, items)
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="📌 Зберегти",
+                        callback_data=f"save:{unique_key}",
+                    ),
+                    InlineKeyboardButton(
+                        text="👎 Не цікаво",
+                        callback_data=f"skip:{unique_key}",
+                    ),
+                ]
+            ]
+        )
 
-        for idx, msg in enumerate(messages, 1):
-            if len(messages) > 1:
-                msg = msg.rstrip() + f"\n\n📄 Частина {idx}/{len(messages)}"
-            await self._bot.send_message(
-                chat_id=self._admin_id,
-                text=msg,
-                parse_mode="HTML",
-                disable_web_page_preview=True,
-            )
-
-        logger.info("Digest sent: %d posts in %d message(s)", len(posts), len(messages))
-
-    @staticmethod
-    def _split_messages(header: str, items: list[str]) -> list[str]:
-        """Pack items into messages, each under 4096 chars. Split at post boundaries."""
-        limit = _MAX_MESSAGE_LEN - _PART_SUFFIX_RESERVE
-        messages: list[str] = []
-        current = header
-
-        for item in items:
-            if len(current) + len(item) > limit:
-                if current.strip():
-                    messages.append(current)
-                current = item
-            else:
-                current += item
-
-        if current.strip():
-            messages.append(current)
-
-        return messages if messages else [header]
+        await self._bot.send_message(
+            chat_id=self._admin_id,
+            text=message,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+            reply_markup=keyboard,
+        )
 
     @staticmethod
     def _truncate(text: str, max_len: int = 300) -> str:
@@ -90,7 +105,6 @@ class NotificationService:
         if len(text) <= max_len:
             return text
         cut = text[:max_len].rsplit(" ", 1)[0]
-        # Prevent cutting in the middle of an HTML entity
         last_amp = cut.rfind("&")
         if last_amp != -1 and ";" not in cut[last_amp:]:
             cut = cut[:last_amp]

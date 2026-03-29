@@ -20,6 +20,12 @@ CREATE TABLE IF NOT EXISTS posts (
     sent       INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS feedback (
+    unique_key TEXT NOT NULL,
+    reaction   TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (unique_key, reaction)
+);
 """
 
 
@@ -68,3 +74,11 @@ class DBService:
         )
         await self.conn.commit()
         logger.info("Post marked as sent: %s (score=%d)", unique_key, score)
+
+    async def save_feedback(self, unique_key: str, reaction: str) -> None:
+        await self.conn.execute(
+            "INSERT OR IGNORE INTO feedback (unique_key, reaction) VALUES (?, ?)",
+            (unique_key, reaction),
+        )
+        await self.conn.commit()
+        logger.info("Feedback saved: %s → %s", unique_key, reaction)

@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 palantir = "palantir.main:main"
+palantir-bot = "palantir.bot:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/palantir"]
