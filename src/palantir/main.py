@@ -21,7 +21,7 @@ def _setup_logging() -> None:
     )
 
 
-async def main() -> None:
+async def _async_main() -> None:
     _setup_logging()
     logger = logging.getLogger(__name__)
     logger.info("Palantir starting up...")
@@ -62,8 +62,6 @@ async def main() -> None:
         await scraper.start()
         logger.info("All services initialized. Starting pipeline loop.")
         await pipeline.run_once()
-    except KeyboardInterrupt:
-        logger.info("Shutdown requested by user")
     finally:
         await scraper.stop()
         await notifier.close()
@@ -71,5 +69,9 @@ async def main() -> None:
         logger.info("Palantir shut down gracefully.")
 
 
+def main() -> None:
+    asyncio.run(_async_main())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

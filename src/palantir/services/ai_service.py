@@ -80,12 +80,11 @@ class AIService:
                 ),
             )
             data = self._parse_json(response.text or "")
+            score = int(data["score"])
+            rationale = str(data["rationale"])
         except Exception:
             logger.exception("LLM call failed for post: %s", post.unique_key)
             return None
-
-        score = int(data["score"])
-        rationale = str(data["rationale"])
         scored = ScoredPost(raw=post, score=score, rationale=rationale)
 
         logger.info("Post %s scored %d/10", post.unique_key, score)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from palantir.models.post import FinalPost, ScoredPost
@@ -39,7 +38,6 @@ class Pipeline:
                 continue
 
             result = await self._ai.process(post)
-            await asyncio.sleep(13)  # Gemini free tier: 5 RPM → 1 req/13s
 
             if result is None:
                 continue
@@ -54,7 +52,8 @@ class Pipeline:
                 )
                 continue
 
-            assert isinstance(result, FinalPost)
+            if not isinstance(result, FinalPost):
+                continue
 
             try:
                 await self._notifier.send_recommendation(result)
@@ -66,12 +65,3 @@ class Pipeline:
         logger.info("Pipeline cycle complete: %d recommendations sent", sent_count)
         return sent_count
 
-    async def run_loop(self, interval_seconds: int = 300) -> None:
-        """Run pipeline in an infinite loop with a sleep interval."""
-        logger.info("Pipeline loop started (interval=%ds)", interval_seconds)
-        while True:
-            try:
-                await self.run_once()
-            except Exception:
-                logger.exception("Pipeline cycle failed")
-            await asyncio.sleep(interval_seconds)

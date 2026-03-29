@@ -34,7 +34,7 @@ class NotificationService:
         analytics = _ANALYTICS_TEMPLATE.format(
             score=post.scored.score,
             rationale=safe_rationale,
-            url=post.scored.raw.url,
+            url=html.escape(post.scored.raw.url),
         )
 
         message = safe_text + analytics
@@ -52,7 +52,12 @@ class NotificationService:
                 'публікації повної версії у блозі: https://aranaur.rbind.io/blog/\n\n'
             )
             available = 4096 - len(longread_header) - len(analytics) - 3
-            truncated = longread_header + safe_text[:available] + "..." + analytics
+            cut = safe_text[:available]
+            # Prevent cutting in the middle of an HTML entity like &amp;
+            last_amp = cut.rfind("&")
+            if last_amp != -1 and ";" not in cut[last_amp:]:
+                cut = cut[:last_amp]
+            truncated = longread_header + cut + "..." + analytics
             await self._bot.send_message(
                 chat_id=self._admin_id,
                 text=truncated,
