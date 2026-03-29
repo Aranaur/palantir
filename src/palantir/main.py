@@ -61,7 +61,7 @@ async def main() -> None:
         await db.connect()
         await scraper.start()
         logger.info("All services initialized. Starting pipeline loop.")
-        await pipeline.run_loop(interval_seconds=settings.poll_interval_seconds)
+        await pipeline.run_once()
     except KeyboardInterrupt:
         logger.info("Shutdown requested by user")
     finally:
