@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,10 +17,12 @@ CREATE TABLE IF NOT EXISTS posts (
     unique_key TEXT PRIMARY KEY,
     source_id  TEXT NOT NULL,
     post_id    TEXT NOT NULL,
+    short_key  TEXT,
     score      INTEGER,
     sent       INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_short_key ON posts (short_key);
 CREATE TABLE IF NOT EXISTS feedback (
     unique_key TEXT NOT NULL,
     reaction   TEXT NOT NULL,
@@ -60,12 +63,25 @@ class DBService:
         )
         return await cursor.fetchone() is not None
 
+    @staticmethod
+    def make_short_key(unique_key: str) -> str:
+        """16-char hex hash of unique_key — safe for Telegram callback_data."""
+        return hashlib.sha256(unique_key.encode()).hexdigest()[:16]
+
     async def mark_seen(self, unique_key: str, source_id: str, post_id: str) -> None:
+        short_key = self.make_short_key(unique_key)
         await self.conn.execute(
-            "INSERT OR IGNORE INTO posts (unique_key, source_id, post_id) VALUES (?, ?, ?)",
-            (unique_key, source_id, post_id),
+            "INSERT OR IGNORE INTO posts (unique_key, source_id, post_id, short_key) VALUES (?, ?, ?, ?)",
+            (unique_key, source_id, post_id, short_key),
         )
         await self.conn.commit()
+
+    async def unique_key_by_short(self, short_key: str) -> str | None:
+        cursor = await self.conn.execute(
+            "SELECT unique_key FROM posts WHERE short_key = ?", (short_key,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
 
     async def mark_sent(self, unique_key: str, score: int) -> None:
         await self.conn.execute(

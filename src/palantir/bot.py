@@ -49,8 +49,13 @@ async def on_reaction(callback: CallbackQuery) -> None:
         await callback.answer("❌ Невідома дія")
         return
 
-    action, unique_key = parts
+    action, short_key = parts
     db: DBService = dp["db"]
+
+    unique_key = await db.unique_key_by_short(short_key)
+    if unique_key is None:
+        await callback.answer("❌ Пост не знайдено")
+        return
 
     await db.save_feedback(unique_key, action)
     await callback.answer(_REACTIONS[action])

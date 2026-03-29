@@ -8,6 +8,7 @@ from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from palantir.models.post import FinalPost
+from palantir.services.db_service import DBService
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ class NotificationService:
         )
         url = html.escape(post.scored.raw.url)
         unique_key = post.scored.raw.unique_key
+        short_key = DBService.make_short_key(unique_key)
 
         message = _POST_TEMPLATE.format(
             summary=safe_text,
@@ -81,11 +83,11 @@ class NotificationService:
                 [
                     InlineKeyboardButton(
                         text="📌 Зберегти",
-                        callback_data=f"save:{unique_key}",
+                        callback_data=f"save:{short_key}",
                     ),
                     InlineKeyboardButton(
                         text="👎 Не цікаво",
-                        callback_data=f"skip:{unique_key}",
+                        callback_data=f"skip:{short_key}",
                     ),
                 ]
             ]
