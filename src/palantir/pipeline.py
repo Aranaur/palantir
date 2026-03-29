@@ -59,14 +59,13 @@ class Pipeline:
 
             recommendations.append(result)
 
+        sent_count = 0
         if recommendations:
             recommendations.sort(key=lambda fp: fp.scored.score, reverse=True)
             sent = await self._notifier.send_digest(recommendations)
+            sent_count = len(sent)
             for rec in sent:
                 await self._db.mark_sent(rec.scored.raw.unique_key, rec.scored.score)
 
-        logger.info(
-            "Pipeline cycle complete: %d recommendations sent",
-            len(recommendations),
-        )
-        return len(recommendations)
+        logger.info("Pipeline cycle complete: %d recommendations sent", sent_count)
+        return sent_count

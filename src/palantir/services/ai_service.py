@@ -133,9 +133,17 @@ class AIService:
 
     @staticmethod
     def _extract_retry_delay(exc: ClientError | ServerError) -> float | None:
-        """Extract retry delay from Gemini error response, or use default backoff."""
+        """Extract retry delay from Gemini error response, or use default backoff.
+
+        Returns None for daily quota errors (retrying won't help until midnight).
+        """
         status = getattr(exc, "status_code", 0)
         if status == 429 or status >= 500:
+            # Daily quota exhausted — no point retrying
+            exc_str = str(exc).lower()
+            if "per_day" in exc_str or "perday" in exc_str or "per day" in exc_str:
+                logger.error("Daily Gemini quota exhausted. Stopping AI processing.")
+                return None
             # Try to parse retryDelay from error details
             details = getattr(exc, "details", None) or []
             if isinstance(details, dict):
