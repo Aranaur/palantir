@@ -14,7 +14,7 @@ from palantir.models.post import FinalPost, RawPost, ScoredPost
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = """\
+_SYSTEM_PROMPT_TEMPLATE = """\
 Ти — персональний асистент-дослідник та аналітик контенту.
 Тематика: Data Science, Computer Science, програмування (зокрема R та Python), математичні методи, моделювання та статистика.
 
@@ -29,7 +29,7 @@ _SYSTEM_PROMPT = """\
    - 5-7: Стандартні новини індустрії, базові туторіали.
    - 8-10: Висока цінність: глибока аналітика, розбір специфічних алгоритмів, статистичних методів, нові потужні інструменти, неочевидні інсайти.
 2. "rationale" (str): Коротке обґрунтування оцінки (1-2 речення). Чому це варто уваги фахівця чи дослідника, і в чому головна "фішка" матеріалу.
-3. "rewritten_text" (str | null): Якщо score >= 8, зроби коротке SUMMARY матеріалу. Якщо score < 8, поверни null.
+3. "rewritten_text" (str | null): Якщо score >= {threshold}, зроби коротке SUMMARY матеріалу. Якщо score < {threshold}, поверни null.
 
    КРИТИЧНІ ВИМОГИ до summary (поле rewritten_text):
    - Формат: ЧИСТИЙ ТЕКСТ. Без HTML-тегів, без Markdown-розмітки (жодних *, #, ```, [], () тощо).
@@ -57,6 +57,7 @@ class AIService:
         self._min_interval = 60.0 / rpm_limit
         self._last_call: float = 0.0
         self._score_threshold = score_threshold
+        self._system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(threshold=score_threshold)
 
     async def process(self, post: RawPost) -> ScoredPost | FinalPost | None:
         """Analyze, score, and (if score >= 6) rewrite post in one flow.
@@ -108,7 +109,7 @@ class AIService:
                     model=self._text_model,
                     contents=text,
                     config=types.GenerateContentConfig(
-                        system_instruction=_SYSTEM_PROMPT,
+                        system_instruction=self._system_prompt,
                         temperature=0.4,
                         response_mime_type="application/json",
                     ),
