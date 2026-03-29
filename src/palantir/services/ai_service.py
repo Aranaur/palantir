@@ -113,7 +113,10 @@ class AIService:
                         response_mime_type="application/json",
                     ),
                 )
-                return self._parse_json(response.text or "")
+                if not response.text:
+                    logger.warning("Empty response from LLM (attempt %d), skipping", attempt)
+                    raise ValueError("Empty LLM response")
+                return self._parse_json(response.text)
             except (ClientError, ServerError) as exc:
                 retry_after = self._extract_retry_delay(exc)
                 if attempt < self._MAX_RETRIES and retry_after is not None:
