@@ -111,12 +111,13 @@ flowchart TB
 ## Features
 
 - **Content Scraping** — Telegram channels (Telethon) + RSS feeds with automatic full-text web scraping
-- **AI Analysis** — Google Gemini scores each publication on a 10-point scale
+- **AI Analysis** — Google Gemini scores each publication on a 10-point scale with Ukrainian-language summaries
 - **Deduplication** — filtering similar content from different sources (Jaccard similarity)
 - **Daily Digest** — sorted recommendations by rating with reaction buttons
 - **Weekly Report** — statistics: processed, recommended, score distribution, top sources
 - **Telegram Commands** — `/status`, `/sources`, `/report`, `/run`, `/help`
 - **Rate limiting** — built-in limiter with retry for Gemini free tier
+- **API Key Rotation** — automatic fallback to a second Gemini key when daily quota is exhausted
 - **Dashboard** — Streamlit app for analytics (local launch)
 
 ## Quick Start
@@ -168,16 +169,17 @@ RSS_FEEDS=["https://example.com/feed.xml"]
 
 # Google Gemini
 GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-2.0-flash
+GEMINI_API_KEY_2=your_second_key  # optional, auto-switches on daily quota exhaustion
+GEMINI_MODEL=gemini-3.1-flash-lite-preview
 
 # Telegram Bot (aiogram)
 BOT_TOKEN=123456:ABC-DEF...
 ADMIN_ID=123456789
 
 # Pipeline
-SCORE_THRESHOLD=7
-SCRAPE_LIMIT=20
-AI_RPM_LIMIT=8
+SCORE_THRESHOLD=6
+SCRAPE_LIMIT=50
+AI_RPM_LIMIT=15
 ```
 
 ## Deployment (Oracle Cloud Free Tier)
@@ -195,7 +197,7 @@ AI_RPM_LIMIT=8
 
 ```bash
 sudo add-apt-repository ppa:deadsnakes/ppa -y
-sudo apt update && sudo apt install -y python3.12 python3.12-venv git
+sudo apt update && sudo apt install -y python3.12 python3.12-venv git sqlite3
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
@@ -252,7 +254,17 @@ WantedBy=multi-user.target
 sudo systemctl enable palantir-bot --now
 ```
 
-### 6. Cron schedule
+### 6. Sudoers for bot restart
+
+```bash
+sudo visudo -f /etc/sudoers.d/palantir
+```
+
+```
+ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl start palantir-bot, /bin/systemctl restart palantir-bot
+```
+
+### 7. Cron schedule
 
 ```bash
 crontab -e
@@ -264,6 +276,16 @@ crontab -e
 
 # Weekly report (Monday 10:00 Kyiv)
 0 7 * * 1 cd /home/ubuntu/palantir && /home/ubuntu/.local/bin/uv run python -m palantir.report >> /home/ubuntu/palantir-report.log 2>&1
+```
+
+### 8. Swap (for 1 GB RAM VM)
+
+```bash
+sudo fallocate -l 1G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ```
 
 </details>
@@ -292,7 +314,7 @@ palantir/
 │   ├── models/
 │   │   └── post.py          # RawPost, ScoredPost, FinalPost
 │   └── services/
-│       ├── ai_service.py    # Gemini AI + rate limiting + retry
+│       ├── ai_service.py    # Gemini AI + rate limiting + key rotation
 │       ├── db_service.py    # SQLite (aiosqlite)
 │       ├── dedup_service.py # Jaccard similarity dedup
 │       ├── notification_service.py  # Telegram digest + reports
@@ -315,4 +337,3 @@ MIT
 <p align="center">
   <em>"He who controls information controls the world"</em>
 </p>
-
