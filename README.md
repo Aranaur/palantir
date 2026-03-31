@@ -63,9 +63,12 @@ flowchart LR
     AI -->|"score ≥ threshold"| DIGEST
     AI -->|"score < threshold"| SKIP
     DIGEST --> BUTTONS
-    BUTTONS -->|feedback| DB
+    BUTTONS -->|"📌 save"| DB
+    BUTTONS -->|"👎 skip"| DB
     AI --> DB
     DB --> REPORT
+    DB -->|saved posts| NEXT["📝 /next\n(post gen)"]
+    NEXT -->|"gemini-2.5-flash"| POSTGEN["Channel\npost draft"]
 
     style Sources fill:#1a1a2e,stroke:#e94560,color:#fff
     style Scraper fill:#1a1a2e,stroke:#0f3460,color:#fff
@@ -113,9 +116,10 @@ flowchart TB
 - **Content Scraping** — Telegram channels (Telethon) + RSS feeds with automatic full-text web scraping
 - **AI Analysis** — Google Gemini scores each publication on a 10-point scale with Ukrainian-language summaries
 - **Deduplication** — filtering similar content from different sources (Jaccard similarity)
-- **Daily Digest** — sorted recommendations by rating with reaction buttons
+- **Daily Digest** — sorted recommendations by rating with reaction buttons (📌 Save / 👎 Not interesting)
+- **Post Generation** — `/next` command generates a ready-to-publish channel post from saved materials using Gemini 2.5 Flash in the author's style
 - **Weekly Report** — statistics: processed, recommended, score distribution, top sources
-- **Telegram Commands** — `/status`, `/sources`, `/report`, `/run`, `/help`
+- **Telegram Commands** — `/status`, `/sources`, `/report`, `/run`, `/next`, `/help`
 - **Rate limiting** — built-in limiter with retry for Gemini free tier
 - **API Key Rotation** — automatic fallback to a second Gemini key when daily quota is exhausted
 - **Dashboard** — Streamlit app for analytics (local launch)
@@ -170,11 +174,13 @@ RSS_FEEDS=["https://example.com/feed.xml"]
 # Google Gemini
 GEMINI_API_KEY=your_gemini_api_key
 GEMINI_API_KEY_2=your_second_key  # optional, auto-switches on daily quota exhaustion
-GEMINI_MODEL=gemini-3.1-flash-lite-preview
+GEMINI_MODEL=gemini-3.1-flash-lite-preview  # scoring model (500 RPD free tier)
+POST_GEN_MODEL=gemini-2.5-flash             # post generation for /next (20 RPD free tier)
 
 # Telegram Bot (aiogram)
 BOT_TOKEN=123456:ABC-DEF...
 ADMIN_ID=123456789
+TG_CHANNEL=@your_channel  # optional, for /next feature
 
 # Pipeline
 SCORE_THRESHOLD=6
@@ -299,6 +305,7 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 | `/sources` | List of all sources |
 | `/report` | Weekly report |
 | `/run` | Run pipeline manually |
+| `/next` | Generate a post draft for the channel from saved materials |
 
 ## Project Structure
 
@@ -306,7 +313,7 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 palantir/
 ├── src/palantir/
 │   ├── main.py              # Pipeline entry point (one-shot)
-│   ├── bot.py               # Telegram bot (callbacks + commands)
+│   ├── bot.py               # Telegram bot (callbacks + commands incl. /next)
 │   ├── report.py            # Weekly report script
 │   ├── dashboard.py         # Streamlit dashboard
 │   ├── config.py            # Settings (pydantic-settings)
@@ -314,8 +321,8 @@ palantir/
 │   ├── models/
 │   │   └── post.py          # RawPost, ScoredPost, FinalPost
 │   └── services/
-│       ├── ai_service.py    # Gemini AI + rate limiting + key rotation
-│       ├── db_service.py    # SQLite (aiosqlite)
+│       ├── ai_service.py    # Gemini AI: scoring + post generation + key rotation
+│       ├── db_service.py    # SQLite (aiosqlite): posts, feedback, published
 │       ├── dedup_service.py # Jaccard similarity dedup
 │       ├── notification_service.py  # Telegram digest + reports
 │       └── scraper_service.py       # Telethon + RSS + web scraping
