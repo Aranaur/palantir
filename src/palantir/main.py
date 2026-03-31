@@ -44,6 +44,7 @@ async def _async_main() -> None:
         rpm_limit=settings.ai_rpm_limit,
         score_threshold=settings.score_threshold,
         fallback_api_key=settings.gemini_api_key_2,
+        post_gen_model=settings.post_gen_model,
     )
     notifier = NotificationService(
         bot_token=settings.bot_token,

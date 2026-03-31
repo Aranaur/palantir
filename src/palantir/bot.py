@@ -9,9 +9,10 @@ import sys
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from palantir.config import get_settings
+from palantir.services.ai_service import AIService
 from palantir.services.db_service import DBService
 from palantir.services.notification_service import NotificationService
 
@@ -29,6 +30,7 @@ _HELP_TEXT = """\
 /sources — список джерел (TG канали + RSS)
 /report — щотижневий звіт (за останні 7 днів)
 /run — запустити pipeline зараз
+/next — рекомендація для публікації в канал
 /help — ця довідка"""
 
 dp = Dispatcher()
@@ -42,7 +44,7 @@ def _admin_only(message: Message) -> bool:
 
 # ── Callback handler ────────────────────────────────────────────
 
-@dp.callback_query()
+@dp.callback_query(F.data.startswith("save:") | F.data.startswith("skip:"))
 async def on_reaction(callback: CallbackQuery) -> None:
     parts = callback.data.split(":", 1) if callback.data else []
     if len(parts) != 2 or parts[0] not in _REACTIONS:
@@ -144,6 +146,155 @@ async def cmd_run(message: Message) -> None:
         await message.answer(f"❌ Помилка запуску: {exc}")
 
 
+# ── /next command ──────────────────────────────────────────────
+
+@dp.message(Command("next"), F.func(_admin_only))
+async def cmd_next(message: Message) -> None:
+    db: DBService = dp["db"]
+    ai: AIService = dp["ai"]
+
+    candidates = await db.get_unpublished_saved()
+    if not candidates:
+        await message.answer("📭 Немає збережених постів для публікації.")
+        return
+
+    best = candidates[0]
+    unique_key = best["unique_key"]
+    short_key = DBService.make_short_key(unique_key)
+
+    rewritten = await db.get_rewritten_text(unique_key)
+    if not rewritten:
+        await message.answer("❌ Не знайдено текст для цього посту.")
+        return
+
+    url = (await (await db.conn.execute(
+        "SELECT url FROM posts WHERE unique_key = ?", (unique_key,)
+    )).fetchone() or (None,))[0] or ""
+
+    await message.answer(
+        f"⏳ Генерую пост ({len(candidates)} в черзі)...",
+    )
+
+    post_text = await ai.generate_post(rewritten, url)
+    if not post_text:
+        await message.answer("❌ Не вдалося згенерувати пост. Спробуйте ще раз.")
+        return
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Опубліковано",
+                    callback_data=f"pub:{short_key}",
+                ),
+                InlineKeyboardButton(
+                    text="⏭️ Пропустити",
+                    callback_data=f"pskip:{short_key}",
+                ),
+                InlineKeyboardButton(
+                    text="🔄 Перегенерувати",
+                    callback_data=f"regen:{short_key}",
+                ),
+            ]
+        ]
+    )
+
+    await message.answer(
+        post_text,
+        reply_markup=keyboard,
+        disable_web_page_preview=True,
+    )
+
+
+@dp.callback_query(F.data.startswith("pub:"))
+async def on_publish(callback: CallbackQuery) -> None:
+    short_key = callback.data.split(":", 1)[1]
+    db: DBService = dp["db"]
+
+    unique_key = await db.unique_key_by_short(short_key)
+    if unique_key is None:
+        await callback.answer("❌ Пост не знайдено")
+        return
+
+    post_text = callback.message.text if callback.message else ""
+    await db.mark_published(unique_key, post_text)
+    await callback.answer("✅ Позначено як опубліковане!")
+    if callback.message:
+        await callback.message.edit_reply_markup(reply_markup=None)
+
+
+@dp.callback_query(F.data.startswith("pskip:"))
+async def on_pub_skip(callback: CallbackQuery) -> None:
+    short_key = callback.data.split(":", 1)[1]
+    db: DBService = dp["db"]
+
+    unique_key = await db.unique_key_by_short(short_key)
+    if unique_key is None:
+        await callback.answer("❌ Пост не знайдено")
+        return
+
+    # Mark as published with empty text so it won't appear again
+    await db.mark_published(unique_key, "")
+    await callback.answer("⏭️ Пропущено")
+    if callback.message:
+        await callback.message.edit_reply_markup(reply_markup=None)
+
+
+@dp.callback_query(F.data.startswith("regen:"))
+async def on_regen(callback: CallbackQuery) -> None:
+    short_key = callback.data.split(":", 1)[1]
+    db: DBService = dp["db"]
+    ai: AIService = dp["ai"]
+
+    unique_key = await db.unique_key_by_short(short_key)
+    if unique_key is None:
+        await callback.answer("❌ Пост не знайдено")
+        return
+
+    rewritten = await db.get_rewritten_text(unique_key)
+    if not rewritten:
+        await callback.answer("❌ Текст не знайдено")
+        return
+
+    url = (await (await db.conn.execute(
+        "SELECT url FROM posts WHERE unique_key = ?", (unique_key,)
+    )).fetchone() or (None,))[0] or ""
+
+    await callback.answer("🔄 Перегенеровую...")
+
+    post_text = await ai.generate_post(rewritten, url)
+    if not post_text:
+        if callback.message:
+            await callback.message.answer("❌ Не вдалося перегенерувати пост.")
+        return
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Опубліковано",
+                    callback_data=f"pub:{short_key}",
+                ),
+                InlineKeyboardButton(
+                    text="⏭️ Пропустити",
+                    callback_data=f"pskip:{short_key}",
+                ),
+                InlineKeyboardButton(
+                    text="🔄 Перегенерувати",
+                    callback_data=f"regen:{short_key}",
+                ),
+            ]
+        ]
+    )
+
+    if callback.message:
+        await callback.message.edit_text(
+            post_text,
+            reply_markup=keyboard,
+            disable_web_page_preview=True,
+        )
+
+
 # ── Entry point ─────────────────────────────────────────────────
 
 async def _async_main() -> None:
@@ -161,10 +312,19 @@ async def _async_main() -> None:
         bot_token=settings.bot_token,
         admin_id=settings.admin_id,
     )
+    ai = AIService(
+        api_key=settings.gemini_api_key,
+        text_model=settings.gemini_model,
+        rpm_limit=settings.ai_rpm_limit,
+        score_threshold=settings.score_threshold,
+        fallback_api_key=settings.gemini_api_key_2,
+        post_gen_model=settings.post_gen_model,
+    )
 
     await db.connect()
     dp["db"] = db
     dp["notifier"] = notifier
+    dp["ai"] = ai
     dp["admin_id"] = settings.admin_id
 
     logger.info("Palantir bot started (long-polling)")

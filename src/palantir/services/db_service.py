@@ -14,13 +14,15 @@ logger = logging.getLogger(__name__)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS posts (
-    unique_key TEXT PRIMARY KEY,
-    source_id  TEXT NOT NULL,
-    post_id    TEXT NOT NULL,
-    short_key  TEXT,
-    score      INTEGER,
-    sent       INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    unique_key     TEXT PRIMARY KEY,
+    source_id      TEXT NOT NULL,
+    post_id        TEXT NOT NULL,
+    short_key      TEXT,
+    score          INTEGER,
+    sent           INTEGER NOT NULL DEFAULT 0,
+    rewritten_text TEXT,
+    url            TEXT,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_short_key ON posts (short_key);
 CREATE TABLE IF NOT EXISTS feedback (
@@ -28,6 +30,11 @@ CREATE TABLE IF NOT EXISTS feedback (
     reaction   TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (unique_key, reaction)
+);
+CREATE TABLE IF NOT EXISTS published (
+    unique_key   TEXT PRIMARY KEY,
+    post_text    TEXT NOT NULL,
+    published_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
 
@@ -43,7 +50,18 @@ class DBService:
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = await aiosqlite.connect(self._db_path)
         await self._conn.executescript(_SCHEMA)
+        await self._migrate()
         logger.info("DB connected: %s", self._db_path)
+
+    async def _migrate(self) -> None:
+        """Add columns that may be missing in older databases."""
+        cursor = await self.conn.execute("PRAGMA table_info(posts)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        for col, col_type in [("rewritten_text", "TEXT"), ("url", "TEXT")]:
+            if col not in columns:
+                await self.conn.execute(f"ALTER TABLE posts ADD COLUMN {col} {col_type}")
+                logger.info("Migrated: added column posts.%s", col)
+        await self.conn.commit()
 
     async def close(self) -> None:
         if self._conn:
@@ -83,10 +101,17 @@ class DBService:
         row = await cursor.fetchone()
         return row[0] if row else None
 
-    async def mark_sent(self, unique_key: str, score: int) -> None:
+    async def mark_sent(
+        self,
+        unique_key: str,
+        score: int,
+        rewritten_text: str = "",
+        url: str = "",
+    ) -> None:
         await self.conn.execute(
-            "UPDATE posts SET sent = 1, score = ? WHERE unique_key = ?",
-            (score, unique_key),
+            "UPDATE posts SET sent = 1, score = ?, rewritten_text = ?, url = ? "
+            "WHERE unique_key = ?",
+            (score, rewritten_text, url, unique_key),
         )
         await self.conn.commit()
         logger.info("Post marked as sent: %s (score=%d)", unique_key, score)
@@ -144,6 +169,33 @@ class DBService:
             "top_sources": top_sources,
             "feedback": feedback,
         }
+
+    async def get_unpublished_saved(self) -> list[dict]:
+        """Get saved (liked) posts that haven't been published yet, best score first."""
+        rows = await (await self.conn.execute(
+            "SELECT p.unique_key, p.source_id, p.score "
+            "FROM posts p "
+            "INNER JOIN feedback f ON p.unique_key = f.unique_key AND f.reaction = 'save' "
+            "WHERE p.unique_key NOT IN (SELECT unique_key FROM published) "
+            "ORDER BY p.score DESC, p.created_at DESC",
+        )).fetchall()
+        return [{"unique_key": r[0], "source_id": r[1], "score": r[2]} for r in rows]
+
+    async def mark_published(self, unique_key: str, post_text: str) -> None:
+        await self.conn.execute(
+            "INSERT OR IGNORE INTO published (unique_key, post_text) VALUES (?, ?)",
+            (unique_key, post_text),
+        )
+        await self.conn.commit()
+        logger.info("Post marked as published: %s", unique_key)
+
+    async def get_rewritten_text(self, unique_key: str) -> str | None:
+        """Get the rewritten_text that was sent in the digest for this post."""
+        cursor = await self.conn.execute(
+            "SELECT rewritten_text FROM posts WHERE unique_key = ?", (unique_key,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
 
     async def save_feedback(self, unique_key: str, reaction: str) -> None:
         await self.conn.execute(

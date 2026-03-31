@@ -14,6 +14,46 @@ from palantir.models.post import FinalPost, RawPost, ScoredPost
 
 logger = logging.getLogger(__name__)
 
+_POST_GEN_PROMPT = """\
+Ти — досвідчений Data Scientist, статистик та автор експертного Telegram-каналу. \
+Твоя мета — розповідати про складні речі (машинне навчання, статистику, аналіз даних) \
+простою, захопливою мовою з практичним стилем.
+
+Твоє завдання: прочитати наданий матеріал і згенерувати пост для Telegram-каналу, \
+суворо дотримуючись авторської стилістики та технічних обмежень платформи.
+
+ГЕНЕРУЙ ПОСТ ВИКЛЮЧНО УКРАЇНСЬКОЮ МОВОЮ.
+
+### Тип контенту
+Звичайне текстове повідомлення: максимум 4096 символів. Краще з невеликим запасом.
+
+### Tone of Voice
+- Експертний, але не сухий академічний. Ти спілкуєшся з колегами.
+- Використовуй влучні метафори (наприклад, "катування даних", "темна магія", "найстрашніше рівняння").
+- Пиши живою мовою, уникай канцеляризмів та типових "маркетингових" чи "нудних" вступів \
+  (ніяких "У цій захопливій статті ми розглянемо...").
+- Оберігай баланс: використовуй професійні терміни (p-value, ML, variance, causal inference), \
+  але поясни їхню суть "на хлопський розум" або через життєві/історичні приклади.
+
+### Структура посту
+1. Заголовок: Влучний, інтригуючий, 1-2 рядки. Обов'язково закінчується тематичним емодзі.
+2. Вступ/Хук: Одразу до суті проблеми. Чому це важливо? Який біль Data Scientist'ів це вирішує? (Іноді можна починати з tl;dr:).
+3. Основна частина: Коротко про те, що зробив автор (з посиланням). Якщо підпис до медіа — скороти до 1-2 речень.
+4. Інсайт / Головна думка (⚡️): Найважливіший висновок або застереження. Обов'язково починається з емодзі ⚡️. Це має бути сильна, критична думка.
+5. Деталі / Приклади (⚡️): Якщо є цікаві кейси зі статті, опиши 1-2 найцікавіші. Починай з ⚡️.
+6. Кінцівка / Call to Action (📌 або 🔗): Заклик заглянути в коментарі за кодом, посиланням на GitHub або перехід на повну статтю. Використовуй 📌 або 🔗.
+
+### Чого ОБОВ'ЯЗКОВО уникати
+- Довгих простирадел тексту (роби абзаци по 2-4 речення).
+- Надмірного використання емодзі (використовуй їх лише як структурні маркери: ⚡️, 📌, 🔗, 🔬).
+- Загальних фраз, які не несуть інформаційної цінності.
+- Хештегів (якщо я прямо не попрошу їх додати).
+
+### ФОРМАТ ВИХОДУ
+Поверни виключно валідний JSON з полем:
+- "post_text" (str): готовий текст посту для Telegram.
+"""
+
 _SYSTEM_PROMPT_TEMPLATE = """\
 Ти — персональний асистент-дослідник для викладача Data Science та статистики.
 Автор працює з R і Python, викладає і готує авторські огляди матеріалів.
@@ -78,9 +118,11 @@ class AIService:
         rpm_limit: int = 8,
         score_threshold: int = 6,
         fallback_api_key: str = "",
+        post_gen_model: str = "gemini-2.5-flash",
     ) -> None:
         self._client = genai.Client(api_key=api_key)
         self._text_model = text_model
+        self._post_gen_model = post_gen_model
         self._min_interval = 60.0 / rpm_limit
         self._last_call: float = 0.0
         self._score_threshold = score_threshold
@@ -124,6 +166,40 @@ class AIService:
             scored=scored,
             rewritten_text=str(rewritten_text),
         )
+
+    async def generate_post(self, summary: str, url: str) -> str | None:
+        """Generate a Telegram channel post from a saved summary using Gemini 2.5 Flash.
+
+        Returns the post text or None on error.
+        """
+        user_content = (
+            f"Матеріал для обробки:\n{summary}\n\n"
+            f"Посилання на оригінал: {url}\n\n"
+            "Тип посту: Звичайний текст (до 4096 символів)"
+        )
+        try:
+            wait = self._min_interval - (time.monotonic() - self._last_call)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_call = time.monotonic()
+
+            response = await self._client.aio.models.generate_content(
+                model=self._post_gen_model,
+                contents=user_content,
+                config=types.GenerateContentConfig(
+                    system_instruction=_POST_GEN_PROMPT,
+                    temperature=0.7,
+                    response_mime_type="application/json",
+                ),
+            )
+            if not response.text:
+                logger.warning("Empty response from LLM for post generation")
+                return None
+            data = self._parse_json(response.text)
+            return data.get("post_text")
+        except Exception:
+            logger.exception("Post generation failed")
+            return None
 
     async def _call_llm_with_retry(self, text: str) -> dict:
         """Call Gemini with rate limiting and retry on 429/5xx errors."""
