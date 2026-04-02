@@ -89,14 +89,24 @@ class NotificationService:
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="📌 Зберегти",
-                        callback_data=f"save:{short_key}",
+                        text="🔴 Низький",
+                        callback_data=f"rate:low:{short_key}",
                     ),
                     InlineKeyboardButton(
-                        text="👎 Не цікаво",
+                        text="🟡 Середній",
+                        callback_data=f"rate:medium:{short_key}",
+                    ),
+                    InlineKeyboardButton(
+                        text="🟢 Високий",
+                        callback_data=f"rate:high:{short_key}",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="👎 Відхилити",
                         callback_data=f"skip:{short_key}",
                     ),
-                ]
+                ],
             ]
         )
 
@@ -135,9 +145,8 @@ class NotificationService:
         ]
 
         if feedback:
-            saved = feedback.get("save", 0)
             skipped = feedback.get("skip", 0)
-            lines.append(f"📌 Збережено: <b>{saved}</b> · 👎 Не цікаво: <b>{skipped}</b>")
+            lines.append(f"👎 Відхилено: <b>{skipped}</b>")
 
         if score_dist:
             lines.append("\n<b>Розподіл оцінок:</b>")

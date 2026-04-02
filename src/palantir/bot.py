@@ -18,10 +18,6 @@ from palantir.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 
-_REACTIONS = {
-    "save": "📌 Збережено!",
-    "skip": "👎 Позначено як нецікаве",
-}
 
 _HELP_TEXT = """\
 <b>Команди Palantir</b>
@@ -44,14 +40,39 @@ def _admin_only(message: Message) -> bool:
 
 # ── Callback handler ────────────────────────────────────────────
 
-@dp.callback_query(F.data.startswith("save:") | F.data.startswith("skip:"))
-async def on_reaction(callback: CallbackQuery) -> None:
-    parts = callback.data.split(":", 1) if callback.data else []
-    if len(parts) != 2 or parts[0] not in _REACTIONS:
+@dp.callback_query(F.data.startswith("rate:"))
+async def on_rate(callback: CallbackQuery) -> None:
+    parts = callback.data.split(":") if callback.data else []
+    if len(parts) != 3:
         await callback.answer("❌ Невідома дія")
         return
 
-    action, short_key = parts
+    _, priority, short_key = parts
+    if priority not in ("high", "medium", "low"):
+        await callback.answer("❌ Невірний пріоритет")
+        return
+
+    db: DBService = dp["db"]
+    unique_key = await db.unique_key_by_short(short_key)
+    if unique_key is None:
+        await callback.answer("❌ Пост не знайдено")
+        return
+
+    try:
+        await db.save_user_priority(unique_key, priority)
+    except ValueError as e:
+        await callback.answer(f"❌ {e}")
+        return
+
+    labels = {"high": "🟢 Високий", "medium": "🟡 Середній", "low": "🔴 Низький"}
+    await callback.answer(f"{labels[priority]} пріоритет збережено!")
+    if callback.message:
+        await callback.message.edit_reply_markup(reply_markup=None)
+
+
+@dp.callback_query(F.data.startswith("skip:"))
+async def on_skip(callback: CallbackQuery) -> None:
+    short_key = callback.data.split(":", 1)[1] if callback.data else ""
     db: DBService = dp["db"]
 
     unique_key = await db.unique_key_by_short(short_key)
@@ -59,9 +80,8 @@ async def on_reaction(callback: CallbackQuery) -> None:
         await callback.answer("❌ Пост не знайдено")
         return
 
-    await db.save_feedback(unique_key, action)
-    await callback.answer(_REACTIONS[action])
-
+    await db.save_feedback(unique_key, "skip")
+    await callback.answer("👎 Відхилено")
     if callback.message:
         await callback.message.edit_reply_markup(reply_markup=None)
 
@@ -86,10 +106,7 @@ async def cmd_status(message: Message) -> None:
 
     feedback = stats.get("feedback", {})
     if feedback:
-        text += (
-            f"📌 Збережено: <b>{feedback.get('save', 0)}</b> · "
-            f"👎 Пропущено: <b>{feedback.get('skip', 0)}</b>"
-        )
+        text += f"👎 Відхилено: <b>{feedback.get('skip', 0)}</b>"
 
     await message.answer(text, parse_mode="HTML")
 

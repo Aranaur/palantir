@@ -36,6 +36,11 @@ CREATE TABLE IF NOT EXISTS published (
     post_text    TEXT NOT NULL,
     published_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS user_ratings (
+    unique_key TEXT PRIMARY KEY,
+    priority   INTEGER NOT NULL CHECK (priority IN (1, 2, 3)),
+    rated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -171,15 +176,45 @@ class DBService:
         }
 
     async def get_unpublished_saved(self) -> list[dict]:
-        """Get saved (liked) posts that haven't been published yet, best score first."""
+        """Get posts queued for publication, sorted by user priority then AI score.
+
+        Includes:
+        - Posts with user_priority set via digest buttons (high/medium/low)
+        - Legacy posts with reaction='save' and no priority (sorted last)
+        Excludes posts already published.
+        """
         rows = await (await self.conn.execute(
-            "SELECT p.unique_key, p.source_id, p.score "
+            "SELECT p.unique_key, p.source_id, p.score, ur.priority "
             "FROM posts p "
-            "INNER JOIN feedback f ON p.unique_key = f.unique_key AND f.reaction = 'save' "
+            "LEFT JOIN user_ratings ur ON p.unique_key = ur.unique_key "
             "WHERE p.unique_key NOT IN (SELECT unique_key FROM published) "
-            "ORDER BY p.score DESC, p.created_at DESC",
+            "  AND ("
+            "    ur.priority IS NOT NULL "
+            "    OR (p.unique_key IN (SELECT unique_key FROM feedback WHERE reaction = 'save')"
+            "        AND ur.priority IS NULL)"
+            "  ) "
+            "ORDER BY COALESCE(ur.priority, 0) DESC, p.score DESC, p.created_at DESC",
         )).fetchall()
-        return [{"unique_key": r[0], "source_id": r[1], "score": r[2]} for r in rows]
+        return [
+            {"unique_key": r[0], "source_id": r[1], "score": r[2], "user_priority": r[3]}
+            for r in rows
+        ]
+
+    async def save_user_priority(self, unique_key: str, priority: str) -> None:
+        """Save or update user priority ('high'|'medium'|'low') for a post.
+
+        Priority is stored as: 3=high, 2=medium, 1=low
+        """
+        priority_map = {"high": 3, "medium": 2, "low": 1}
+        if priority not in priority_map:
+            raise ValueError(f"Invalid priority: {priority}")
+
+        await self.conn.execute(
+            "INSERT OR REPLACE INTO user_ratings (unique_key, priority) VALUES (?, ?)",
+            (unique_key, priority_map[priority]),
+        )
+        await self.conn.commit()
+        logger.info("User priority saved: %s → %s", unique_key, priority)
 
     async def mark_published(self, unique_key: str, post_text: str) -> None:
         await self.conn.execute(
