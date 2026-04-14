@@ -37,6 +37,7 @@ async def _async_main() -> None:
         tg_channels=settings.tg_channels,
         rss_feeds=settings.rss_feeds,
         scrape_limit=settings.scrape_limit,
+        custom_blogs=settings.custom_blogs,
     )
     ai = AIService(
         api_key=settings.gemini_api_key,

@@ -34,10 +34,12 @@ class ScraperService:
         tg_channels: list[str],
         rss_feeds: list[str],
         scrape_limit: int = 50,
+        custom_blogs: list[str] | None = None,
     ) -> None:
         self._tg_channels = tg_channels
         self._rss_feeds = rss_feeds
         self._scrape_limit = scrape_limit
+        self._custom_blogs = custom_blogs or []
         self._client = TelegramClient(tg_session_name, tg_api_id, tg_api_hash)
         self._http = httpx.AsyncClient(
             timeout=_HTTP_TIMEOUT,
@@ -61,8 +63,12 @@ class ScraperService:
     async def fetch_all(self) -> list[RawPost]:
         tg_posts = await self._fetch_telegram()
         rss_posts = await self._fetch_rss()
-        all_posts = tg_posts + rss_posts
-        logger.info("Fetched %d posts total (TG=%d, RSS=%d)", len(all_posts), len(tg_posts), len(rss_posts))
+        blog_posts = await self._fetch_custom_blogs()
+        all_posts = tg_posts + rss_posts + blog_posts
+        logger.info(
+            "Fetched %d posts total (TG=%d, RSS=%d, blogs=%d)",
+            len(all_posts), len(tg_posts), len(rss_posts), len(blog_posts),
+        )
         return all_posts
 
     async def _fetch_telegram(self) -> list[RawPost]:
@@ -122,6 +128,52 @@ class ScraperService:
                     )
             except Exception:
                 logger.exception("Failed to fetch RSS feed: %s", feed_url)
+        return posts
+
+    async def _fetch_custom_blogs(self) -> list[RawPost]:
+        """Scrape blog index pages that don't have RSS feeds."""
+        posts: list[RawPost] = []
+        for blog_url in self._custom_blogs:
+            try:
+                resp = await self._http.get(blog_url)
+                resp.raise_for_status()
+                soup = BeautifulSoup(resp.text, "html.parser")
+
+                from urllib.parse import urljoin, urlparse
+                base = f"{urlparse(blog_url).scheme}://{urlparse(blog_url).netloc}"
+
+                # Collect all internal blog post links
+                seen: set[str] = set()
+                article_links: list[str] = []
+                for a in soup.find_all("a", href=True):
+                    href = a["href"]
+                    full_url = urljoin(base, href)
+                    # Keep only links that look like blog posts (contain /blog/)
+                    if (
+                        "/blog/" in full_url
+                        and full_url != blog_url
+                        and full_url not in seen
+                        and urlparse(full_url).netloc == urlparse(blog_url).netloc
+                    ):
+                        seen.add(full_url)
+                        article_links.append(full_url)
+
+                for link in article_links[: self._scrape_limit]:
+                    post_id = hashlib.sha256(link.encode()).hexdigest()[:16]
+                    full_text = await self._fetch_article(link)
+                    if not full_text:
+                        continue
+                    posts.append(
+                        RawPost(
+                            source_id=f"blog:{blog_url}",
+                            post_id=post_id,
+                            text=full_text,
+                            url=link,
+                            timestamp=datetime.now(timezone.utc),
+                        )
+                    )
+            except Exception:
+                logger.exception("Failed to scrape custom blog: %s", blog_url)
         return posts
 
     async def _fetch_article(self, url: str) -> str | None:

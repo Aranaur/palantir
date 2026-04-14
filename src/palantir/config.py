@@ -30,6 +30,12 @@ class Settings(BaseSettings):
         description="List of RSS feed URLs to monitor",
     )
 
+    # --- Custom blogs (no RSS) ---
+    custom_blogs: list[str] = Field(
+        default_factory=list,
+        description="Blog index URLs to scrape for post links (no RSS available)",
+    )
+
     # --- Google Gemini ---
     gemini_api_key: str
     gemini_api_key_2: str = ""
